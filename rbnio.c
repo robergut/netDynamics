@@ -10,26 +10,24 @@ int readRBN( FILE* f, RBN* net )
     initM(net, 0, net->n);
     for (i = 0; i < net->n; i++)
     {
-        fscanf(f, "%c", (net->state + i) );
-        net->state[i] -= 48;
+        net->state[i] = getc(f) - 48;
     }
     fscanf(f, "\n");
     for (i = 0; i < net->n; i++)
     {
         for (j = 0; j < net->n; j++)
         {
-            fscanf(f, "%c", (net->conn[i] + j) );
-            net->conn[i][j] -= 48;
+            net->conn[i][j] = getc(f) - 48;
         }
     }
     fscanf(f, "\n");
-    initRules(net, 0.0f);
     for (i = 0; i < net->n; i++)
     {
-        for (j = 0; j < pow(2, kAt(net, i)); j++)
+        int size = 1 << kAt(net, i);
+        net->rules[i] = ( char* ) realloc(net->rules[i], size * sizeof( char ) );
+        for (j = 0; j < size; j++)
         {
-            fscanf(f, "%c", (net->rules[i] + j) );
-            net->rules[i][j] -= 48;
+            net->rules[i][j] = getc(f) - 48;
         }
     }
     fscanf(f, "\n");
@@ -54,7 +52,8 @@ int appendRBN(FILE* f, RBN* net)
     fprintf(f, "\n");
     for (i = 0; i < net->n; i++)
     {
-        for (j = 0; j < pow(2, kAt(net, i)); j++)
+        int size = 1 << kAt(net, i);
+        for (j = 0; j < size; j++)
         {
             fprintf(f, "%d", net->rules[i][j]);
         }
@@ -74,6 +73,9 @@ Config* readConf( const char* name )
         free(conf);
         return NULL;
     }
+    /// Optional keys at the end of the file
+    conf->seed           = 0;
+    conf->exhaustiveMaxN = 0;
     fscanf(f, "#operations:topology,get_attractors,get_phase\n");
     fscanf(f, "nm:%hd\n",           &conf->nm);
     fscanf(f, "m:%hd\n",            &conf->m);
@@ -90,6 +92,8 @@ Config* readConf( const char* name )
     fscanf(f, "operations:%64s\n",  conf->operations );
     /// Constants
     fscanf(f, "maxStates:%d\n",     &conf->maxStates );
+    fscanf(f, "seed:%llu\n",        &conf->seed );
+    fscanf(f, "exhaustiveMaxN:%d\n", &conf->exhaustiveMaxN );
     fclose(f);
     return conf;
 }

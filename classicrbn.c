@@ -67,10 +67,11 @@ void initRules(RBN* net, float prob)
     register int i, j;
     for (i = 0; i < net->n; i++)
     {
-        net->rules[i] = ( char* ) realloc(net->rules[i], pow(2, kAt(net, i)) * sizeof( char ) );
-        for (j = 0; j < pow(2, kAt(net, i)); j++)
+        int size = 1 << kAt(net, i);
+        net->rules[i] = ( char* ) realloc(net->rules[i], size * sizeof( char ) );
+        for (j = 0; j < size; j++)
         {
-            net->rules[i][j] = ((float)rand() / RAND_MAX) < prob;
+            net->rules[i][j] = rngDouble(&rng) < prob;
         }
     }
 }
@@ -80,7 +81,7 @@ void randomInitial(RBN* net)
     register int i;
     for (i = 0; i < net->n; i++)
     {
-        net->state[i] = rand() % 2;
+        net->state[i] = rngNext(&rng) >> 63;
     }
 }
 
@@ -171,7 +172,7 @@ void generateHomogeneousConnectionMatrix(RBN* net)
         j = 0;
         while (j < net->k)
         {
-            tmp = rand() % net->n; //get random node
+            tmp = rngInt(&rng, net->n); //get random node
             if (!net->conn[i][tmp]) //let's see if we haven't used it
             {
                 net->conn[i][tmp] = 1;
@@ -193,7 +194,7 @@ void generateNormalConnectionMatrix(RBN* net)
     {
         for (j = 0; j < net->n; j++)
         {
-            net->conn[i][j] = ( ((float)rand() / RAND_MAX) * net->n < net->k);
+            net->conn[i][j] = ( rngDouble(&rng) * net->n < net->k);
         }
     }
 }
@@ -209,7 +210,12 @@ void generateScaleFreeConnectionMatrix(RBN* net)
     int Ks[net->n];//number of connections that each node will receive
     for (i = 0; i < net->n; i++)
     {
-        Ks[i] = (int) floor(pow( ((float)rand() / RAND_MAX), -(1 / (net->k - 1))));
+        double u = 1.0 - rngDouble(&rng); // (0, 1], avoids an infinite K
+        Ks[i] = net->n;
+        if (pow(u, -(1 / (net->k - 1))) < net->n)
+        {
+            Ks[i] = (int) floor(pow(u, -(1 / (net->k - 1))));
+        }
         if (Ks[i] > net->n)
         {
             Ks[i] = net->n; //bound number of connections to N (only one K per node allowed...)
@@ -220,7 +226,7 @@ void generateScaleFreeConnectionMatrix(RBN* net)
         j = 0;
         while (j < floor(Ks[i]))
         {
-            tmp = (int) floor( ((float)rand() / RAND_MAX) * net->n); //get random node
+            tmp = rngInt(&rng, net->n); //get random node
             if (!net->conn[i][tmp]) //let's see if we haven't used it
             {
                 net->conn[i][tmp] = 1;
@@ -260,7 +266,7 @@ void generateCoupledConnectionMatrix(RBN* net)
                     if (x == y) //it should be an inner-matrix (i.e. a matrix in the diagonal) and
                     {
                         //a number between 0 and n
-                        net->conn[i][j] = ( ((float)rand() / RAND_MAX) * net->nm < net->k);
+                        net->conn[i][j] = ( rngDouble(&rng) * net->nm < net->k);
                     }
                     else
                     {
@@ -312,10 +318,10 @@ void generateInterModuleConnections(RBN* net, int** freePositions)
         {
             do
             {
-                x = rand() % net->nm + modCont;
+                x = rngInt(&rng, net->nm) + modCont;
             }
             while ( freePositions[x][j] == -1 );
-            net->conn[x][freePositions[x][j]] = ( ((float)rand() / RAND_MAX) * net->nm * complement < net->l);
+            net->conn[x][freePositions[x][j]] = ( rngDouble(&rng) * net->nm * complement < net->l);
             freePositions[x][j] = -1;//just tu mark it, though it is not really necessary
         }
         if ((i + 1) % net->nm == 0)
@@ -332,9 +338,9 @@ void generateInterModuleConnections(RBN* net, int** freePositions)
 void shuffle(int* cards, int n)
 {
     register int i, r, temp;
-    for (i = 0; i < n; i++)
+    for (i = n - 1; i > 0; i--) // Fisher-Yates
     {
-        r = rand() % n;
+        r = rngInt(&rng, i + 1);
         temp = cards[i];
         cards[i] = cards[r];
         cards[r] = temp;
@@ -352,7 +358,7 @@ void shuffle(int* cards, int n)
 static void doubleRule(RBN* net, const int node, const char* oldRule, const int degNode)
 {
     register int i, j;
-    int size   = pow(2, kAt(net, node) + 1);
+    int size   = 1 << (kAt(net, node) + 1);
     int weight = 0; // Weight of degNode in the old rule index
     if (net->conn[node][degNode])
     {
@@ -379,7 +385,7 @@ static void doubleRule(RBN* net, const int node, const char* oldRule, const int 
  */
 void addNode(RBN* net, float* deg)
 {
-    register int i, j, k, aux, size, selfLoop, degNode = rand() % net->n;
+    register int i, j, k, aux, size, selfLoop, degNode = rngInt(&rng, net->n);
     int* ones   = ( int* ) calloc( net->n, sizeof( int ) );
     int* zero   = ( int* ) calloc( net->n, sizeof( int ) );
     for (i = 0; i < net->n; i++)
@@ -436,7 +442,7 @@ void addNode(RBN* net, float* deg)
     }
 
     // Keep the rules of degNode before they are expanded with the new input.
-    aux = pow(2, kAt(net, degNode));
+    aux = 1 << kAt(net, degNode);
     char* degRules = ( char* ) malloc( aux * sizeof( char ) );
     memcpy(degRules, net->rules[degNode], aux * sizeof( char ));
 
@@ -444,7 +450,7 @@ void addNode(RBN* net, float* deg)
     {
         if ( net->conn[i][net->n] )
         {
-            aux = pow(2, kAt(net, i));
+            aux = 1 << kAt(net, i);
             char* oldRule = ( char* ) malloc( aux * sizeof( char ) );
             memcpy(oldRule, net->rules[i], aux * sizeof( char ));
             doubleRule(net, i, oldRule, degNode);
@@ -454,7 +460,7 @@ void addNode(RBN* net, float* deg)
     // The redundant node has the rule of degNode, and if it is its own input
     // (degNode had a self-loop), the rule is doubled as for the other nodes.
     selfLoop = net->conn[net->n][net->n];
-    size = pow(2, kAt(net, net->n) + selfLoop);
+    size = 1 << (kAt(net, net->n) + selfLoop);
     if (selfLoop)
     {
         doubleRule(net, net->n, degRules, degNode);
@@ -475,7 +481,7 @@ void addNode(RBN* net, float* deg)
     aux = size * (1 - deg[FUNCTION_DEGENERACY]);
     for (i = 0; i < aux; i++) // new random values with probability p
     {
-        net->rules[net->n][ones[i]] = ((float)rand() / RAND_MAX) < net->p;
+        net->rules[net->n][ones[i]] = rngDouble(&rng) < net->p;
     }
 
     free(ones);
@@ -504,7 +510,8 @@ void toString(RBN* net)
     printf("rules:\n");
     for (i = 0; i < net->n; i++)
     {
-        for (j = 0; j < pow(2, kAt(net, i)); j++)
+        int size = 1 << kAt(net, i);
+        for (j = 0; j < size; j++)
         {
             printf("%d", net->rules[i][j]);
         }

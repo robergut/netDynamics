@@ -22,6 +22,8 @@ typedef struct
     char operations[MAX];       /// topology,get_attractors,get_phase
     /// constants:
     int maxStates;
+    unsigned long long seed;    /// Seed of the random numbers, 0 to use the time.
+    int exhaustiveMaxN;         /// Max number of nodes to find all the attractors, 0 to sample.
 } Config;
 
 int     readRBN  ( FILE*, RBN* );

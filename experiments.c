@@ -55,13 +55,9 @@ void addState(Attractor* at, const char* state, const int n)
     }
     else
     {
-        Chain* s = at->states;
-        while (s->next != NULL)
-        {
-            s = s->next;
-        }
-        s->next = c;
+        at->last->next = c;
     }
+    at->last = c;
     at->period++;
 }
 
@@ -116,7 +112,7 @@ void reportPhase(FILE* file, const int NET_COUNT, const int INITIAL_STATES_COUNT
             memcpy(nodesAt,         net->state, sizeof(char) * net->n);
             for (j2 = 0; j2 < INI_STEPS; j2++)   //run maxAsynch steps
             {
-                step(net);
+                next(net);
             } /// should be optimized to check before running 10000 steps for deterministic cases...
             memcpy(nodesAt1,        net->state, sizeof(char) * net->n);
             memcpy(net->state,      nodesAt,    sizeof(char) * net->n);
@@ -126,7 +122,7 @@ void reportPhase(FILE* file, const int NET_COUNT, const int INITIAL_STATES_COUNT
             memcpy(nodesBt,         net->state, sizeof(char) * net->n);
             for (j2 = 0; j2 < INI_STEPS; j2++)   //run maxAsynch steps
             {
-                step(net);
+                next(net);
             } /// should be optimized to check before running 10000 steps for deterministic cases...
 
             double dt    = hamming(nodesAt,   nodesBt,      n);
@@ -182,7 +178,7 @@ void reportAttractors( FILE* file,  const int maxStates, const int n, RBN* net )
     FILE* f = fopen("attractors.txt", "w");
     fprintf(f, "# File to be read by R\n");
     fprintf(f, "# Attractors found (maximum period is %d).\n", MAX_ATTRACTOR);
-    fprintf(f, "# States found in attractors. from %d possible states in network\n", (int)pow(2, net->n));
+    fprintf(f, "# States found in attractors. from %.0f possible states in network\n", ldexp(1, net->n));
     while ( readRBN(file, net) )
     {generateLinksAdyacentList(net);//
         randomInitial(net);

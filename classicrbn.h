@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include "rng.h"
 
 //This must replace the type of data for rbn's elements
 #define T char
@@ -34,6 +35,7 @@ typedef enum {INPUT_DEGENERACY, OUTPUT_DEGENERACY, FUNCTION_DEGENERACY, REDUNDAN
 
 void initModular    ( RBN*, int, float, float, int );
 void init           ( RBN*, int, float );
+void freeRBN        ( RBN*, const int );
 void freeRBN        ( RBN*, const int );
 void initM          ( RBN*, const int, const int );
 void initRules      ( RBN*, float );

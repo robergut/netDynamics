@@ -205,3 +205,140 @@ versión:
   alteraban la dinámica original aun con degeneración total, y la function degeneracy
   con `fd = 0` generaba la función negada en lugar de una aleatoria. Los experimentos
   de degeneración tendrían que volver a correrse.
+
+# Optimización (después del commit `309043e`)
+
+El análisis de las redes de hasta 64 nodos usa ahora un motor nuevo. La generación de
+redes, el formato de `salida` y `deg_nodes`, y `addNode` siguen igual. Las redes de más
+de 64 nodos usan la implementación anterior (`reportAttractors` y `reportPhase`).
+
+## Archivos nuevos
+
+| Archivo | Contenido |
+|---|---|
+| `rng.c`, `rng.h` | Generador xoshiro256** con semilla, sustituye a `rand()` |
+| `fastrbn.c`, `fastrbn.h` | `FastNet`: estado en un `uint64_t` y tablas de reglas en bits |
+| `fastexp.c`, `fastexp.h` | Búsqueda de atractores y fase con `FastNet` |
+
+## Estado en bits (`fastrbn.c`)
+
+- `compileNet` convierte una `RBN` en `FastNet`. El bit `i` del estado es el nodo `i`;
+  cada nodo guarda sus entradas en orden ascendente, una máscara de bits y su tabla de
+  reglas con un bit por entrada.
+- La tabla se reordena para que el bit `j` del índice sea la `j`-ésima entrada en orden
+  ascendente. Así el índice se puede obtener con `pext` (x86 con BMI2, `make NATIVE=1`)
+  o con un ciclo sobre las K entradas.
+- `fastNext` calcula el siguiente estado, con la misma actualización síncrona que
+  `step` y `next`.
+- `fastNextSliced` calcula un paso de 64 redes a la vez: el bit `l` de cada palabra
+  pertenece a la red `l`. Los nodos con hasta 10 entradas se evalúan con un árbol de
+  multiplexores sobre la tabla; los demás, carril por carril.
+
+## Atractores (`fastexp.c`)
+
+Con `exhaustiveMaxN` en `config` se elige el método:
+
+- **Búsqueda exhaustiva** (N ≤ `exhaustiveMaxN`, máximo 26). `buildStateSpace`
+  recorre una sola vez los 2^N estados y guarda para cada uno su ciclo, cuántos pasos
+  tarda en llegar a él (`depth`) y en qué posición entra (`entry`). Se obtienen todos
+  los atractores, sin límite de periodo, y el tamaño exacto de cada cuenca.
+- **Muestreo** (redes más grandes o `exhaustiveMaxN: 0`). Para cada uno de `maxStates`
+  estados iniciales:
+  - el algoritmo de Brent arranca desde el estado inicial, sin los `INI_STEPS` pasos
+    previos, y admite transitorios de hasta 16,384 pasos (antes, `INI_STEPS + MARGIN`);
+  - una tabla hash recuerda hasta 2^20 estados visitados con su atractor, y una
+    trayectoria se detiene en cuanto llega a uno de ellos;
+  - cada ciclo se identifica por su estado mínimo, así que reconocer un atractor ya
+    conocido es una búsqueda en la tabla hash.
+- En los dos métodos, los ciclos que comparten estados en los nodos del núcleo
+  (`nm`) se cuentan como un solo atractor, y los estados en atractores se cuentan sobre
+  el núcleo. Así se respeta el criterio de `contains`, que solo compara los nodos
+  originales. Sin nodos redundantes no hay diferencia.
+- Archivo de salida nuevo, `basins.txt`: el tamaño de la cuenca de cada atractor, en
+  orden descendente, una red por línea. En la búsqueda exhaustiva son estados; en el
+  muestreo, estados iniciales que llegaron a ese atractor.
+
+## Fase (`fastexp.c`)
+
+- **Con búsqueda exhaustiva**, el estado después de `INI_STEPS` pasos se calcula sin
+  simular: es `ciclo[(entry + INI_STEPS − depth) mod periodo]`, o se recorren los
+  pasos si `INI_STEPS ≤ depth`. El resultado es idéntico al de la simulación.
+- **Sin búsqueda exhaustiva**, se simulan 64 estados iniciales a la vez con
+  `fastNextSliced`, junto con sus copias con el nodo 0 invertido. Si todas las parejas
+  llegan al mismo estado, se detiene la simulación, porque seguirán iguales.
+- La distancia de Hamming se calcula con `popcount` sobre los primeros `n` nodos, como
+  antes.
+
+## Números aleatorios y paralelismo
+
+- `rand()` se sustituyó por xoshiro256** (`rng.c`) en toda la generación de redes.
+  `rngInt` da enteros sin sesgo, y `rngDouble` da valores en [0, 1) con 53 bits.
+- Clave nueva `seed` en `config`. Con `0` se usa la hora; la semilla usada se imprime y
+  se guarda en `attractors.txt` y `phase-hamming.txt`.
+- Cada red, y cada grupo de 64 estados iniciales de la fase, usa su propio flujo de
+  números aleatorios derivado de la semilla (`rngStream`). Los resultados no dependen
+  del número de hilos.
+- `make OPENMP=1` paraleliza las redes (atractores) y los estados iniciales (fase). No
+  se probó: el compilador de macOS no incluye OpenMP. Sin esa opción, los `#pragma` se
+  ignoran.
+
+## Otros cambios
+
+- **`shuffle`** usaba `r = rand() % n` para todas las posiciones, lo que da
+  permutaciones sesgadas. Ahora es Fisher-Yates.
+- **Topología libre de escala**: con `rand() = 0`, `pow(0, −γ)` era infinito y su
+  conversión a `int` es indefinida. Ahora `u ∈ (0, 1]`, y K se acota a N antes de
+  convertirlo.
+- **`fopen(..., "a+")`** en macOS empieza a leer al final del archivo, así que `feof`
+  siempre era verdadero y cada ejecución agregaba otras `iterations` redes a `salida`.
+  Ahora se hace `rewind` antes de revisar si el archivo está vacío (`main.c`). En Linux
+  (glibc) no ocurría.
+- `readRBN` lee con `getc` en lugar de `fscanf("%c")`, y ya no llama a `initRules`,
+  que generaba números aleatorios innecesarios.
+- `pow(2, kAt(...))` se sustituyó por `1 << k`, calculado una vez por nodo y no en
+  cada vuelta del ciclo.
+- `addState` agrega en tiempo constante, con un puntero al último estado
+  (`Attractor.last`).
+- `reportPhase` (implementación lenta) usa `next` en lugar de `step`, que recorre toda
+  la matriz de conexiones en cada paso.
+- El encabezado de `reportAttractors` usaba `(int) pow(2, n)`, que se desborda con
+  N ≥ 31.
+
+## Verificación
+
+| Prueba | Resultado |
+|---|---|
+| `fastNext` contra `step` (300 redes de las tres topologías, con y sin nodos redundantes) | 0 diferencias en 19,200 pasos |
+| `fastNextSliced` contra `step`, con nodos de K = 12 | 0 diferencias en 19,200 pasos |
+| Búsqueda exhaustiva contra fuerza bruta (200 redes, N = 4 a 12) | Mismos atractores y cuencas en las 200 |
+| Muestreo contra búsqueda exhaustiva (100 redes, con nodos redundantes y núcleo) | Mismos conteos en las 100 |
+| `getAttractors` anterior contra búsqueda exhaustiva (50 redes) | Mismos conteos en las 50 |
+| `stateAfter` contra simulación (60 redes, T de 0 a 10,002) | 0 diferencias en 126,000 casos |
+| Programa completo con AddressSanitizer y `leaks` | 0 errores, 0 fugas |
+
+Con las mismas redes (N = 20, K = 5, 3 redes, 8,192 estados iniciales), ambas versiones
+dan el mismo promedio de fase dentro del ruido de muestreo (0.3657 y 0.3668). En
+atractores, el muestreo coincide con la versión anterior y la búsqueda exhaustiva
+encuentra además los atractores con cuencas de muy pocos estados.
+
+## Tiempos
+
+Configuración de la tesis: N = 15 + 5 nodos redundantes, K = 5, 32,768 estados
+iniciales, `get_attractors` y `get_phase`, en un solo núcleo (Apple Silicon).
+
+| Versión | Tiempo por red |
+|---|---|
+| Anterior (commit `309043e`) | 109 s |
+| Nueva, muestreo con 64 trayectorias por palabra | 7.6 s |
+| Nueva, búsqueda exhaustiva (`exhaustiveMaxN: 24`) | 0.12 s |
+
+Las 1000 redes del capítulo 5 pasarían de unas 30 horas a unos 2 minutos.
+
+## Efecto en los resultados
+
+- **Con búsqueda exhaustiva** los resultados son exactos y no muestreados: aparecen
+  atractores con cuencas pequeñas que el muestreo no alcanza, y no hay límite de
+  periodo. Con `exhaustiveMaxN: 0` se usa muestreo, comparable con la tesis.
+- **El generador de números aleatorios cambió**, así que la misma configuración genera
+  redes distintas a las de la versión anterior. Con `seed` fijo, ahora se generan
+  siempre las mismas.

@@ -3,7 +3,9 @@
 #include <time.h>
 #include <math.h>
 #include <string.h>
+#include <unistd.h>
 #include "experiments.h"
+#include "fastexp.h"
 #include "classicrbn.h"
 #include "rbnio.h"
 #define N 10
@@ -16,7 +18,6 @@ int main(int argc, char* argv[])
 {
     if (argc == 1) // 1
     {
-        srand( time(NULL) );
         RBN* net = ( RBN* ) malloc( sizeof( RBN ) );
         register int i;
         //Config* conf    = readConf("/home/robert/config");
@@ -35,8 +36,12 @@ int main(int argc, char* argv[])
             free(conf);
             return 0;
         }
+        uint64_t seed   = conf->seed ? conf->seed : (uint64_t) time(NULL) ^ ((uint64_t) getpid() << 32);
+        rngSeed(&rng, seed);
+        printf("Seed: %llu\n", (unsigned long long) seed);
         initModular(net, conf->nm + conf->redNodes, conf->k, conf->l, conf->m);
         net->p = conf->p;
+        rewind(out); // the initial read position with "a+" is the end of file in some systems
         fscanf(out, "\n");
         if ( feof(out) )
         {
@@ -76,16 +81,45 @@ int main(int argc, char* argv[])
             rewind(out);
             printf("Image module has not been implemented yet.\n");
         }
-        if (strstr(conf->operations, "get_attractors") != NULL)
+        int attractors  = strstr(conf->operations, "get_attractors") != NULL;
+        int phase       = strstr(conf->operations, "get_phase") != NULL;
+        int count       = 0;
+        FastNet* nets   = NULL;
+        if (attractors || phase)
         {
             rewind(out);
-            reportAttractors(out, conf->maxStates, conf->nm, net);
+            nets = loadNets(out, net, &count);
+            if (nets == NULL)
+            {
+                printf("Networks with more than %d nodes, using the slow implementation.\n", FAST_MAX_N);
+            }
         }
-        if (strstr(conf->operations, "get_phase") != NULL)
+        if (attractors)
         {
-            rewind(out);
-            reportPhase(out, conf->iterations, conf->maxStates, conf->nm + conf->redNodes, net);
+            if (nets != NULL)
+            {
+                reportAttractorsFast(nets, count, conf->maxStates, conf->nm, conf->exhaustiveMaxN, seed, net);
+            }
+            else
+            {
+                rewind(out);
+                reportAttractors(out, conf->maxStates, conf->nm, net);
+            }
         }
+        if (phase)
+        {
+            if (nets != NULL)
+            {
+                reportPhaseFast(nets, count < conf->iterations ? count : conf->iterations,
+                                conf->maxStates, conf->nm + conf->redNodes, conf->exhaustiveMaxN, seed, net);
+            }
+            else
+            {
+                rewind(out);
+                reportPhase(out, conf->iterations, conf->maxStates, conf->nm + conf->redNodes, net);
+            }
+        }
+        freeNets(nets, count);
         fclose(out);
         freeRBN(net, (conf->nm + conf->redNodes) * conf->m);
         free(conf);

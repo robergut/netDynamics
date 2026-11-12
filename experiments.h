@@ -20,6 +20,7 @@ typedef struct att
 {
     int         period;
     Chain*      states;
+    Chain*      last;   // Last state, to append in constant time
     struct att* next;
 } Attractor;
 

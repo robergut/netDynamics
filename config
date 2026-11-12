@@ -13,3 +13,5 @@ iterations:1
 file:./salida
 operations:get_attractors
 maxStates:32768
+seed:0
+exhaustiveMaxN:24
