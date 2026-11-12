@@ -22,21 +22,28 @@ int main(int argc, char* argv[])
         //Config* conf    = readConf("/home/robert/config");
         //Config* conf    = readConf(argv[1]);
         Config* conf    = readConf("config");
+        if (conf == NULL)
+        {
+            free(net);
+            return 1;
+        }
         FILE* out       = fopen(conf->file, "a+");
         if (out == NULL)
         {
             printf("No such file or directory.\n");
+            free(net);
+            free(conf);
             return 0;
         }
         initModular(net, conf->nm + conf->redNodes, conf->k, conf->l, conf->m);
+        net->p = conf->p;
         fscanf(out, "\n");
         if ( feof(out) )
         {
             printf("Create and store %d networks\n", conf->iterations);
-            net->p = conf->p;
             for (i = 0; i < conf->iterations; i++)
             {
-                initM(net, 0, net->nm);
+                initM(net, 0, net->n);
                 net->nm = conf->nm;
                 net->n  = net->nm * net->m;
                 generateConnectionMatrix(net, conf->topology);
@@ -80,6 +87,8 @@ int main(int argc, char* argv[])
             reportPhase(out, conf->iterations, conf->maxStates, conf->nm + conf->redNodes, net);
         }
         fclose(out);
+        freeRBN(net, (conf->nm + conf->redNodes) * conf->m);
+        free(conf);
     }
     else
     {

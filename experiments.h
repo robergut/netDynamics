@@ -30,6 +30,8 @@ typedef struct
 } List;
 
 void    addAttractor( List*, Attractor* );
+void    freeAttractor ( Attractor* );
+void    freeAttractors( List* );
 int     statesInAttr( List*);
 void    addState    ( Attractor*, const char*, const int );
 int     contains    ( Attractor*, const char*, const int );

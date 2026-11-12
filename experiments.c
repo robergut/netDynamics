@@ -18,6 +18,31 @@ void addAttractor(List* l, Attractor* newAtt)
     l->size++;
 }
 
+void freeAttractor(Attractor* at)
+{
+    Chain* s = at->states;
+    while (s != NULL)
+    {
+        Chain* tmp = s->next;
+        free(s->state);
+        free(s);
+        s = tmp;
+    }
+    free(at);
+}
+
+void freeAttractors(List* l)
+{
+    Attractor* a = l->att;
+    while (a != NULL)
+    {
+        Attractor* tmp = a->next;
+        freeAttractor(a);
+        a = tmp;
+    }
+    free(l);
+}
+
 void addState(Attractor* at, const char* state, const int n)
 {
     Chain* c = (Chain*) calloc(1, sizeof( Chain ) );
@@ -75,9 +100,9 @@ void reportPhase(FILE* file, const int NET_COUNT, const int INITIAL_STATES_COUNT
     fprintf(hammingFile, "# File to be read by R\n");
     fprintf(hammingFile, "ktot\tdt\tdt1\tdelta\n");//headers for the file
 
-    while ( readRBN(file, net) )
+    while ( j < NET_COUNT && readRBN(file, net) )
     {generateLinksAdyacentList(net);
-        printf("New net#%d of %d\n", j++, NET_COUNT);
+        printf("New net#%d of %d\n", j, NET_COUNT);
         double avgdt    = 0;
         double avgdt1   = 0;
         conns = getK(net);
@@ -113,19 +138,25 @@ void reportPhase(FILE* file, const int NET_COUNT, const int INITIAL_STATES_COUNT
 
             fprintf(hammingFile, "%d\t%f\t%f\t%f\n", conns, dt, dt1, delta);
         }
-        avgdt   /= MAX_STATES;
-        avgdt1  /= MAX_STATES;
-        deltas[j] = avgdt1 - avgdt;
+        avgdt   /= INITIAL_STATES_COUNT;
+        avgdt1  /= INITIAL_STATES_COUNT;
+        deltas[j++] = avgdt1 - avgdt;
+    }
+    if (j == 0)
+    {
+        printf("No networks were read.\n");
+        fclose(hammingFile);
+        return;
     }
     double stddevs = 0;
-    avgd /= NET_COUNT * MAX_STATES;
+    avgd /= (double) j * INITIAL_STATES_COUNT;
     printf("%f\t\n", avgd);
-    for (i4 = 0; i4 < NET_COUNT; i4++)
+    for (i4 = 0; i4 < j; i4++)
     {
         stddevs += pow(deltas[i4] - avgd, 2);
     }
     printf("\t\n");
-    stddevs = sqrt(stddevs / NET_COUNT);
+    stddevs = sqrt(stddevs / j);
     printf("%f\n", stddevs);
 
     // detailedPhase
@@ -159,7 +190,7 @@ void reportAttractors( FILE* file,  const int maxStates, const int n, RBN* net )
         attractors = getAttractors(net, maxStates, n);
         fprintf(f, "%d\t%d\n", attractors->size, statesInAttr(attractors));
         i++;
-        free(attractors);
+        freeAttractors(attractors);
     }
     fclose(f);
     printf ("\nIt took %.2lf seconds.\n", difftime(time(NULL), start));
@@ -179,10 +210,11 @@ int statesInAttr( List* attractors)
 
 /**
  * Finds attractors within the Net.
- * <p>This method uses the "slow" technique for attractor finding.<br>
- * The full {@link redrbn.Attractor#INI_STEPS} steps of the Net will be run in order to
- * seek for attractors; Then, {@link redrbn.Attractor#MARGIN} additional steps will be
- * run looking for attractors.
+ * <p>The full {@link redrbn.Attractor#INI_STEPS} steps of the Net will be run to
+ * skip the transient; Then, the cycle is detected with Brent's algorithm, allowing
+ * up to {@link redrbn.Attractor#MARGIN} additional transient steps.<br>
+ * Cycles longer than {@link #MAX_ATTRACTOR} are not stored, they are counted as
+ * unresolved initial states instead.
  * </p>
  *
  * @return The attractors found inside the Net.
@@ -193,8 +225,10 @@ List* getAttractors(RBN* net, int maximal, const int n)
 {
     List* attractors = ( List* ) calloc(1, sizeof( List ) );
     Attractor* a;
+    char* tortoise = ( char* ) malloc( net->n * sizeof( char ) );
     int attractorFound;//indicates if the attractor has already been found
-    register int i = 0, j, k;
+    int power, period, unresolved = 0;
+    register int i = 0, k;
 
     while (i < maximal) // try the maximal initial states
     {
@@ -202,44 +236,70 @@ List* getAttractors(RBN* net, int maximal, const int n)
             printf(" %d", i);
         }
         randomInitial(net);
-        attractorFound = 0;
-        for (j = 0; j < INI_STEPS; j++) // run initial steps
+        for (k = 0; k < INI_STEPS; k++) // run initial steps
         {
             next(net);//step(net);
         }
-        for (j = 0; j < MARGIN; j++)
+        /// Brent's cycle detection: the full state is compared to detect the cycle.
+        memcpy(tortoise, net->state, net->n * sizeof( char ));
+        next(net);
+        power = period = 1;
+        while ( memcmp(tortoise, net->state, net->n * sizeof( char )) )
         {
-            next(net);//step(net);
-            a = attractors->att;
-            while (a != NULL) //check if already in attractors
+            if (power == period)
             {
-                if (contains(a, net->state, n))//
+                if (power > MAX_ATTRACTOR + MARGIN)
                 {
-                    attractorFound = 1;
                     break;
                 }
-                a = a->next;
+                memcpy(tortoise, net->state, net->n * sizeof( char ));
+                power *= 2;
+                period = 0;
             }
-            ///if none was found, generate the attractor
-            if (!attractorFound)
+            next(net);
+            period++;
+        }
+        if ( memcmp(tortoise, net->state, net->n * sizeof( char )) || period > MAX_ATTRACTOR )
+        {
+            unresolved++;
+            i++;
+            continue;
+        }
+        /// net->state is within the cycle, check if already in attractors
+        attractorFound = 0;
+        a = attractors->att;
+        while (a != NULL)
+        {
+            if (contains(a, net->state, n))//
             {
-                Attractor* aux = ( Attractor* ) calloc(1, sizeof( Attractor ) );
-                //not optimal, but let's have same function for all...
-                addState(aux, net->state, n);//
-                for (k = 0; k < MAX_ATTRACTOR; k++)
-                {
-                    next(net);//step(net);
-                    if (!contains(aux, net->state, n))//
-                    {
-                        addState(aux, net->state, n);//
-                    }
-                }
-                addAttractor(attractors, aux);
+                attractorFound = 1;
+                break;
             }
+            a = a->next;
+        }
+        ///if none was found, generate the attractor
+        if (!attractorFound)
+        {
+            Attractor* aux = ( Attractor* ) calloc(1, sizeof( Attractor ) );
+            for (k = 0; k < period; k++)
+            {
+                if (!contains(aux, net->state, n))//
+                {
+                    addState(aux, net->state, n);//
+                }
+                next(net);//step(net);
+            }
+            addAttractor(attractors, aux);
         }
         i++;
     }
     printf(" %d.", i);
+    if (unresolved)
+    {
+        printf(" (%d initial states without attractor of period <= %d)", unresolved, MAX_ATTRACTOR);
+    }
+    printf("\n");
+    free(tortoise);
     return attractors;
 }
 

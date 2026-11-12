@@ -34,6 +34,7 @@ typedef enum {INPUT_DEGENERACY, OUTPUT_DEGENERACY, FUNCTION_DEGENERACY, REDUNDAN
 
 void initModular    ( RBN*, int, float, float, int );
 void init           ( RBN*, int, float );
+void freeRBN        ( RBN*, const int );
 void initM          ( RBN*, const int, const int );
 void initRules      ( RBN*, float );
 void randomInitial  ( RBN* );

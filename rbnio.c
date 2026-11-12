@@ -71,7 +71,8 @@ Config* readConf( const char* name )
     {
         printf("Error reading the file: %s\n", name);
         // TODO: create file
-        return conf;
+        free(conf);
+        return NULL;
     }
     fscanf(f, "#operations:topology,get_attractors,get_phase\n");
     fscanf(f, "nm:%hd\n",           &conf->nm);
@@ -85,8 +86,8 @@ Config* readConf( const char* name )
     fscanf(f, "id:%f\n",            &conf->red[INPUT_DEGENERACY]);
     fscanf(f, "od:%f\n",            &conf->red[OUTPUT_DEGENERACY]);
     fscanf(f, "iterations:%hd\n",   &conf->iterations);
-    fscanf(f, "file:%s\n",          conf->file       );
-    fscanf(f, "operations:%s\n",    conf->operations );
+    fscanf(f, "file:%64s\n",        conf->file       );
+    fscanf(f, "operations:%64s\n",  conf->operations );
     /// Constants
     fscanf(f, "maxStates:%d\n",     &conf->maxStates );
     fclose(f);

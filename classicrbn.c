@@ -27,6 +27,27 @@ void init(RBN* net, int n, float k)
     initModular(net, n, k, 0.0f, 1);
 }
 
+/**
+ * Frees the network.
+ * @param size Number of nodes allocated in {@link #initModular}, net->n could be lower.
+ */
+void freeRBN(RBN* net, const int size)
+{
+    register int i;
+    for (i = 0; i < size; i++)
+    {
+        free(net->conn[i]);
+        free(net->rules[i]);
+        free(net->links[i]);
+    }
+    free(net->conn);
+    free(net->rules);
+    free(net->links);
+    free(net->state);
+    free(net->nextState);
+    free(net);
+}
+
 void initM(RBN* net, const int from, const int to)
 {
     register int i, j;
@@ -264,6 +285,11 @@ void generateCoupledConnectionMatrix(RBN* net)
             }
         }
         generateInterModuleConnections(net, libres);
+        for (i = 0; i < net->n; i++)
+        {
+            free(libres[i]);
+        }
+        free(libres);
     }
 }
 
@@ -286,7 +312,7 @@ void generateInterModuleConnections(RBN* net, int** freePositions)
         {
             do
             {
-                x = rand() * net->nm + modCont;// TODO check rand(nm)
+                x = rand() % net->nm + modCont;
             }
             while ( freePositions[x][j] == -1 );
             net->conn[x][freePositions[x][j]] = ( ((float)rand() / RAND_MAX) * net->nm * complement < net->l);
@@ -316,13 +342,44 @@ void shuffle(int* cards, int n)
 }
 
 /**
+ * Doubles the rule of a node that gets the redundant node as input. The redundant
+ * node is the last column, so it is the least significant bit of the rule index
+ * (see step).
+ * <p>If node also has degNode as input, the new rule uses (degNode OR redundant)
+ * where the old rule used degNode. Otherwise, the redundant input is ignored.</p>
+ * @param oldRule Rule of node before adding the redundant node.
+ */
+static void doubleRule(RBN* net, const int node, const char* oldRule, const int degNode)
+{
+    register int i, j;
+    int size   = pow(2, kAt(net, node) + 1);
+    int weight = 0; // Weight of degNode in the old rule index
+    if (net->conn[node][degNode])
+    {
+        weight = 1;
+        for (j = degNode + 1; j < net->n; j++)
+        {
+            if (net->conn[node][j])
+            {
+                weight *= 2;
+            }
+        }
+    }
+    net->rules[node] = (char*)realloc(net->rules[node], size * sizeof(char));
+    for (i = 0; i < size; i++)
+    {
+        net->rules[node][i] = oldRule[(i & 1) ? (i >> 1) | weight : i >> 1];
+    }
+}
+
+/**
  * Duplicate functionality of a node adding the redundant node at least.
  * @param net The network that will be added a node.
  * @param deg Degree of Degeneracy for \link {Redundancy}
  */
 void addNode(RBN* net, float* deg)
 {
-    register int i, j, k, aux, size, degNode = rand() % net->n;
+    register int i, j, k, aux, size, selfLoop, degNode = rand() % net->n;
     int* ones   = ( int* ) calloc( net->n, sizeof( int ) );
     int* zero   = ( int* ) calloc( net->n, sizeof( int ) );
     for (i = 0; i < net->n; i++)
@@ -378,43 +435,47 @@ void addNode(RBN* net, float* deg)
         net->conn[zero[i]][net->n] = 1;
     }
 
+    // Keep the rules of degNode before they are expanded with the new input.
+    aux = pow(2, kAt(net, degNode));
+    char* degRules = ( char* ) malloc( aux * sizeof( char ) );
+    memcpy(degRules, net->rules[degNode], aux * sizeof( char ));
+
     for (i = 0; i < net->n; i++) // Copy function deg
     {
         if ( net->conn[i][net->n] )
         {
             aux = pow(2, kAt(net, i));
-            net->rules[i] = (char*)realloc(net->rules[i], (aux * 2) * sizeof(char));
-            for (j = 0; j < aux; j++)
-            {
-                net->rules[i][j + aux] = net->rules[i][j];
-            }
+            char* oldRule = ( char* ) malloc( aux * sizeof( char ) );
+            memcpy(oldRule, net->rules[i], aux * sizeof( char ));
+            doubleRule(net, i, oldRule, degNode);
+            free(oldRule);
         }
     }
-    if (net->conn[net->n][net->n])
+    // The redundant node has the rule of degNode, and if it is its own input
+    // (degNode had a self-loop), the rule is doubled as for the other nodes.
+    selfLoop = net->conn[net->n][net->n];
+    size = pow(2, kAt(net, net->n) + selfLoop);
+    if (selfLoop)
     {
-        size = pow(2, kAt(net, net->n) + 1);
+        doubleRule(net, net->n, degRules, degNode);
     }
     else
     {
-        size = pow(2, kAt(net, net->n));
+        net->rules[net->n] = (char*)realloc(net->rules[net->n], size * sizeof(char));
+        memcpy(net->rules[net->n], degRules, size * sizeof(char));
     }
-    net->rules[net->n] = (char*)realloc(net->rules[net->n], size * sizeof(char));
-    aux = pow(2, kAt(net, degNode));
+    free(degRules);
+
+    ones = (int*) realloc( ones, size * sizeof(int) );
     for (i = 0; i < size; i++)
     {
-        net->rules[net->n][i] = net->rules[degNode][i % aux];
+        ones[i] = i;
     }
-
-    ones = (int*) realloc( ones, pow(2, kAt(net, net->n)) * sizeof(int) );
-    for (i = j = k = 0; i < pow(2, kAt(net, net->n)); i++)
+    shuffle(ones, size);
+    aux = size * (1 - deg[FUNCTION_DEGENERACY]);
+    for (i = 0; i < aux; i++) // new random values with probability p
     {
-        ones[j++] = i;
-    }
-    shuffle(ones, j);
-    aux = j * (1 - deg[FUNCTION_DEGENERACY]);
-    for (i = 0; i < aux; i++)
-    {
-        net->rules[net->n][ones[i]] = !net->rules[net->n][ones[i]];
+        net->rules[net->n][ones[i]] = ((float)rand() / RAND_MAX) < net->p;
     }
 
     free(ones);
