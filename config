@@ -10,8 +10,9 @@ fd:1.0
 id:1.0
 od:1.0
 iterations:1
-file:./salida
+file:results/salida
 operations:get_attractors
 maxStates:32768
 seed:0
 exhaustiveMaxN:24
+outDir:results

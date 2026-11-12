@@ -1,0 +1,7 @@
+# Build artifacts
+*.o
+/netDynamics
+
+# Working runs: they are regenerated from the config_used.txt of each run.
+# The final results of the article go in paper/, which is versioned.
+/results/

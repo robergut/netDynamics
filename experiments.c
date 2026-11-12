@@ -92,7 +92,7 @@ void reportPhase(FILE* file, const int NET_COUNT, const int INITIAL_STATES_COUNT
     printf("***Analysing Phases for %d networks\n", NET_COUNT);
     printf("  N: %d, K: %f, M: %d, L: %f, P: %f, Q:f\n", net->n, net->k, net->m, net->l, net->p);
 
-    FILE* hammingFile = fopen("phase-hamming.txt", "w+");
+    FILE* hammingFile = openOutput("phase-hamming.txt", "w+");
     fprintf(hammingFile, "# File to be read by R\n");
     fprintf(hammingFile, "ktot\tdt\tdt1\tdelta\n");//headers for the file
 
@@ -175,7 +175,7 @@ void reportAttractors( FILE* file,  const int maxStates, const int n, RBN* net )
     printf("*** Attractors Found\n");
     printf("  N: %d, K: %.2f, M: %d, L: %.2f, P: %.2f, Q:.2f\n\n", net->n, net->k, net->m, net->l, net->p);
 
-    FILE* f = fopen("attractors.txt", "w");
+    FILE* f = openOutput("attractors.txt", "w");
     fprintf(f, "# File to be read by R\n");
     fprintf(f, "# Attractors found (maximum period is %d).\n", MAX_ATTRACTOR);
     fprintf(f, "# States found in attractors. from %.0f possible states in network\n", ldexp(1, net->n));

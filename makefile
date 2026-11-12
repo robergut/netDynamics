@@ -24,3 +24,9 @@ $(OBJECTS): $(HEADERS)
 
 .c.o:
 	$(CC) $(CFLAGS) $< -o $@
+
+# make clean: remove the build files (needed after changing NATIVE or OPENMP).
+clean:
+	rm -f $(OBJECTS) $(EXECUTABLE)
+
+.PHONY: all clean

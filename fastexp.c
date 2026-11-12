@@ -501,8 +501,8 @@ void reportAttractorsFast(FastNet* nets, const int count, const int maxStates, c
         st[i] = fastAttractors(&nets[i], coreMask, maxStates, exhaustiveMaxN, &r);
     }
 
-    FILE* f = fopen("attractors.txt", "w");
-    FILE* b = fopen("basins.txt", "w");
+    FILE* f = openOutput("attractors.txt", "w");
+    FILE* b = openOutput("basins.txt", "w");
     fprintf(f, "# File to be read by R\n");
     if (method == EXHAUSTIVE)
     {
@@ -632,7 +632,7 @@ void reportPhaseFast(FastNet* nets, const int count, const int initialStates, co
     printf("***Analysing Phases for %d networks\n", count);
     printf("  N: %d, K: %f, M: %d, L: %f, P: %f\n", net->n, net->k, net->m, net->l, net->p);
 
-    FILE* hammingFile = fopen("phase-hamming.txt", "w+");
+    FILE* hammingFile = openOutput("phase-hamming.txt", "w+");
     fprintf(hammingFile, "# File to be read by R\n");
     fprintf(hammingFile, "# seed: %llu\n", (unsigned long long) seed);
     fprintf(hammingFile, "ktot\tdt\tdt1\tdelta\n");//headers for the file

@@ -16,18 +16,38 @@ void generateConnectionMatrix(RBN*, Topology);
 
 int main(int argc, char* argv[])
 {
-    if (argc == 1) // 1
+    if (argc > 1 && (!strcmp(argv[1], "-h") || !strcmp(argv[1], "--help")))
     {
-        RBN* net = ( RBN* ) malloc( sizeof( RBN ) );
-        register int i;
-        //Config* conf    = readConf("/home/robert/config");
-        //Config* conf    = readConf(argv[1]);
-        Config* conf    = readConf("config");
+        printf("Usage: %s [config_file] [--key=value | --key value]...\n"
+               "  config_file defaults to ./config. Each --key overrides the value from the file.\n"
+               "  Keys: nm m k l p topology redNodes fd id od iterations file operations\n"
+               "        maxStates seed exhaustiveMaxN outDir\n"
+               "  Example: %s config --k 3.0 --seed=42\n", argv[0], argv[0]);
+        return 0;
+    }
+    {
+        /// argv[1] is the config file unless it is already an override (--key).
+        int first            = (argc > 1 && strncmp(argv[1], "--", 2) != 0) ? 2 : 1;
+        const char* confFile = first == 2 ? argv[1] : "config";
+        Config* conf    = readConf(confFile);
         if (conf == NULL)
         {
-            free(net);
             return 1;
         }
+        if (!applyConfArgs(conf, argc - first, argv + first))
+        {
+            printf("Run %s --help for usage.\n", argv[0]);
+            free(conf);
+            return 1;
+        }
+        if (!setOutputDir(conf->outDir))
+        {
+            free(conf);
+            return 1;
+        }
+        printf("Output directory: %s\n", conf->outDir[0] ? conf->outDir : ".");
+        RBN* net = ( RBN* ) malloc( sizeof( RBN ) );
+        register int i;
         FILE* out       = fopen(conf->file, "a+");
         if (out == NULL)
         {
@@ -43,7 +63,8 @@ int main(int argc, char* argv[])
         net->p = conf->p;
         rewind(out); // the initial read position with "a+" is the end of file in some systems
         fscanf(out, "\n");
-        if ( feof(out) )
+        int generated = feof(out);
+        if ( generated )
         {
             printf("Create and store %d networks\n", conf->iterations);
             for (i = 0; i < conf->iterations; i++)
@@ -58,11 +79,38 @@ int main(int argc, char* argv[])
                 appendRBN(out, net);
             }
         }
+        /// Store the configuration used (after the overrides and with the actual seed) next to the results.
+        FILE* used      = openOutput("config_used.txt", "w");
+        {
+            time_t now  = time(NULL);
+            fprintf(used, "# Configuration used by this run. Repeat it with: %s %s/config_used.txt\n",
+                    argv[0], conf->outDir[0] ? conf->outDir : ".");
+            fprintf(used, "# Date: %s", ctime(&now));
+            fprintf(used, "# Command:");
+            for (i = 0; i < argc; i++)
+            {
+                fprintf(used, " %s", argv[i]);
+            }
+            fprintf(used, "\n");
+            if (generated)
+            {
+                fprintf(used, "# The networks were generated with this seed and stored in '%s'.\n", conf->file);
+            }
+            else
+            {
+                fprintf(used, "# The networks were loaded from '%s' (not generated): network parameters\n"
+                              "# such as nm, k, m and the seed did not create them. Keep that file to repeat the run.\n",
+                        conf->file);
+            }
+            conf->seed  = seed;
+            writeConf(used, conf);
+            fclose(used);
+        }
         if ( conf->redNodes != 0 )
         {
             rewind(out);
             printf("Creating RBNs with Redundand nodes.\n");
-            FILE* deg = fopen("deg_nodes", "w+");
+            FILE* deg = openOutput("deg_nodes", "w+");
             while ( readRBN(out, net) )
             {
                 net->nm = conf->nm;
@@ -123,10 +171,6 @@ int main(int argc, char* argv[])
         fclose(out);
         freeRBN(net, (conf->nm + conf->redNodes) * conf->m);
         free(conf);
-    }
-    else
-    {
-        printf("PARAM 1. Config file.\n");
     }
     /*RBN* net = ( RBN* ) malloc( sizeof( RBN ) );
     init(net, N, K);
